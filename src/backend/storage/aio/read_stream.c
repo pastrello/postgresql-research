@@ -138,6 +138,14 @@ struct ReadStream
 
 	bool		fast_path;
 
+	/* PG18-R OBS-001: backend-local measurement counters. */
+	uint64		stats_reads_started;
+	uint64		stats_blocks_started;
+	uint64		stats_reads_waited;
+	uint64		stats_reads_no_wait;
+	uint64		stats_wait_calls;
+	int32		stats_peak_distance;
+
 	/* Circular queue of buffers. */
 	int16		oldest_buffer_index;	/* Next pinned buffer to return */
 	int16		next_buffer_index;	/* Index of next buffer to pin */
@@ -359,6 +367,13 @@ read_stream_start_pending_read(ReadStream *stream)
 								 &nblocks,
 								 flags);
 	stream->pinned_buffers += nblocks;
+
+	stream->stats_reads_started++;
+	stream->stats_blocks_started += nblocks;
+	if (need_wait)
+		stream->stats_reads_waited++;
+	else
+		stream->stats_reads_no_wait++;
 
 	/* Remember whether we need to wait before returning this buffer. */
 	if (!need_wait)
@@ -720,6 +735,7 @@ read_stream_begin_impl(int flags,
 		stream->distance = Min(max_pinned_buffers, stream->io_combine_limit);
 	else
 		stream->distance = 1;
+	stream->stats_peak_distance = stream->distance;
 
 	/*
 	 * Since we always access the same relation, we can initialize parts of
@@ -928,6 +944,7 @@ read_stream_next_buffer(ReadStream *stream, void **per_buffer_data)
 		Assert(stream->ios[io_index].op.buffers ==
 			   &stream->buffers[oldest_buffer_index]);
 
+		stream->stats_wait_calls++;
 		WaitReadBuffers(&stream->ios[io_index].op);
 
 		Assert(stream->ios_in_progress > 0);
@@ -939,6 +956,8 @@ read_stream_next_buffer(ReadStream *stream, void **per_buffer_data)
 		distance = stream->distance * 2;
 		distance = Min(distance, stream->max_pinned_buffers);
 		stream->distance = distance;
+		if (stream->stats_peak_distance < distance)
+			stream->stats_peak_distance = distance;
 
 		/*
 		 * If we've reached the first block of a sequential region we're
@@ -1119,6 +1138,22 @@ read_stream_reset(ReadStream *stream)
 void
 read_stream_end(ReadStream *stream)
 {
+	Oid			relid = InvalidOid;
+
+	if (stream->ios[0].op.rel)
+		relid = RelationGetRelid(stream->ios[0].op.rel);
+
+	elog(DEBUG1,
+		 "PG18-R ReadStream stats: relid=%u sync=%d batch=%d max_ios=%d combine_limit=%d max_pins=%d reads_started=%llu blocks_started=%llu waited=%llu no_wait=%llu wait_calls=%llu peak_distance=%d",
+		 relid, stream->sync_mode, stream->batch_mode, stream->max_ios,
+		 stream->io_combine_limit, stream->max_pinned_buffers,
+		 (unsigned long long) stream->stats_reads_started,
+		 (unsigned long long) stream->stats_blocks_started,
+		 (unsigned long long) stream->stats_reads_waited,
+		 (unsigned long long) stream->stats_reads_no_wait,
+		 (unsigned long long) stream->stats_wait_calls,
+		 stream->stats_peak_distance);
+
 	read_stream_reset(stream);
 	pfree(stream);
 }
