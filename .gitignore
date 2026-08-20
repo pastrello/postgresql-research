@@ -1,0 +1,29 @@
+# Builds locais
+/build/
+/build-*/
+
+# Clusters/dados locais
+/pgdata/
+/data/
+
+# Artefatos temporários
+*.log
+*.tmp
+*.swp
+*~
+
+# Profiling
+perf.data
+perf.data.old
+
+# Core dumps
+core
+core.*
+
+# IDE/editor
+.vscode/
+.idea/
+
+# SO
+.DS_Store
+Thumbs.db
