@@ -40,9 +40,11 @@
 #include "access/valid.h"
 #include "access/visibilitymap.h"
 #include "access/xloginsert.h"
+#include "catalog/catalog.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_database_d.h"
 #include "commands/vacuum.h"
+#include "miscadmin.h"
 #include "pgstat.h"
 #include "port/pg_bitutils.h"
 #include "storage/lmgr.h"
@@ -401,7 +403,19 @@ initscan(HeapScanDesc scan, ScanKey key, bool keep_startblock)
 	{
 		/* During a rescan, keep the previous strategy object. */
 		if (scan->rs_strategy == NULL)
-			scan->rs_strategy = GetAccessStrategy(BAS_BULKREAD);
+		{
+			int			io_concurrency;
+
+			/* Mirror ReadStream: avoid tablespace-cache recursion for catalogs. */
+			if (!OidIsValid(MyDatabaseId) || IsCatalogRelation(scan->rs_base.rs_rd))
+				io_concurrency = effective_io_concurrency;
+			else
+				io_concurrency = get_tablespace_io_concurrency(
+					scan->rs_base.rs_rd->rd_rel->reltablespace);
+
+			scan->rs_strategy = GetAccessStrategyWithIOConcurrency(
+				BAS_BULKREAD, io_concurrency);
+		}
 	}
 	else
 	{
