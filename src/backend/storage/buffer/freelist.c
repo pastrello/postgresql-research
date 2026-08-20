@@ -603,9 +603,9 @@ GetAccessStrategyWithIOConcurrency(BufferAccessStrategyType btype,
 				 * buffers can obviously not yet be reused.
 				 *
 				 * Each IO can be up to io_combine_limit blocks large, and we
-				 * want to start up to effective_io_concurrency IOs.
+				 * want to start up to io_concurrency IOs.
 				 *
-				 * Note that effective_io_concurrency may be 0, which disables
+				 * Note that io_concurrency may be 0, which disables
 				 * AIO.
 				 */
 				ring_size_kb += (BLCKSZ / 1024) *
