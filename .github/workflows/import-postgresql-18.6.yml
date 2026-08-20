@@ -1,0 +1,73 @@
+name: Import PostgreSQL 18.6 upstream
+
+on:
+  push:
+    branches:
+      - research/bootstrap
+    paths:
+      - .github/workflows/import-postgresql-18.6.yml
+
+permissions:
+  contents: write
+
+jobs:
+  import-upstream:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout launcher branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download, verify and import PostgreSQL 18.6
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          URL='https://ftp.postgresql.org/pub/source/v18.6/postgresql-18.6.tar.gz'
+          EXPECTED_SHA256='983ee554ec53dbeb9b70797bef9fcf4e67e117e7e48ca1463cc80b3ff8e8ff3f'
+          WORK="$(mktemp -d)"
+          TARBALL="$WORK/postgresql-18.6.tar.gz"
+          SOURCE="$WORK/source"
+
+          curl --fail --location --retry 3 --retry-delay 2 "$URL" --output "$TARBALL"
+          echo "$EXPECTED_SHA256  $TARBALL" | sha256sum --check --strict -
+
+          mkdir -p "$SOURCE"
+          tar -xzf "$TARBALL" -C "$SOURCE" --strip-components=1
+
+          test -f "$SOURCE/configure"
+          test -d "$SOURCE/src/backend"
+          grep -q "18.6" "$SOURCE/configure"
+
+          mapfile -t SOURCE_ROOTS < <(find "$SOURCE" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
+          test "${#SOURCE_ROOTS[@]}" -gt 5
+
+          git fetch origin main
+          git switch -C upstream-18.6 origin/main
+
+          git rm -r --ignore-unmatch -- \
+            .gitignore README.md benchmarks docs patches research tools .github
+
+          cp -a "$SOURCE/." .
+          git add -- "${SOURCE_ROOTS[@]}"
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git status --short
+          git commit -m 'upstream: import PostgreSQL 18.6 release sources'
+          git push --force-with-lease origin upstream-18.6
+
+      - name: Remove temporary importer from launcher branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git switch research/bootstrap
+          git pull --ff-only origin research/bootstrap
+          git rm -- .github/workflows/import-postgresql-18.6.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore: remove PostgreSQL 18.6 import workflow'
+          git push origin research/bootstrap
