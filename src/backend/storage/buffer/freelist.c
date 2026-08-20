@@ -540,7 +540,23 @@ StrategyInitialize(bool init)
 BufferAccessStrategy
 GetAccessStrategy(BufferAccessStrategyType btype)
 {
+	return GetAccessStrategyWithIOConcurrency(btype, effective_io_concurrency);
+}
+
+/*
+ * GetAccessStrategyWithIOConcurrency -- create a BufferAccessStrategy using
+ * the supplied I/O concurrency when sizing a bulk-read ring.
+ *
+ * GetAccessStrategy() preserves upstream behavior by passing the global
+ * effective_io_concurrency value.
+ */
+BufferAccessStrategy
+GetAccessStrategyWithIOConcurrency(BufferAccessStrategyType btype,
+									 int io_concurrency)
+{
 	int			ring_size_kb;
+
+	Assert(io_concurrency >= 0);
 
 	/*
 	 * Select ring size to use.  See buffer/README for rationales.
@@ -593,7 +609,7 @@ GetAccessStrategy(BufferAccessStrategyType btype)
 				 * AIO.
 				 */
 				ring_size_kb += (BLCKSZ / 1024) *
-					io_combine_limit * effective_io_concurrency;
+					io_combine_limit * io_concurrency;
 
 				if (ring_size_kb > ring_max_kb)
 					ring_size_kb = ring_max_kb;

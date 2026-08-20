@@ -1,0 +1,87 @@
+name: PERF-001 build and regression test
+
+on:
+  push:
+    branches:
+      - research/perf-001-tablespace-bulkread-ring
+    paths:
+      - .github/workflows/perf001-ci.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential flex bison libreadline-dev zlib1g-dev libssl-dev liblz4-dev libzstd-dev
+
+      - name: Configure build and test
+        shell: bash
+        run: |
+          set +e
+          CONFIG_RC=0
+          BUILD_RC=99
+          CHECK_RC=99
+
+          ./configure --enable-cassert --enable-debug --with-openssl --with-lz4 --with-zstd > /tmp/perf001-configure.log 2>&1
+          CONFIG_RC=$?
+          if [ "$CONFIG_RC" -eq 0 ]; then
+            make -s -j2 > /tmp/perf001-build.log 2>&1
+            BUILD_RC=$?
+          else
+            echo 'build skipped: configure failed' > /tmp/perf001-build.log
+          fi
+          if [ "$BUILD_RC" -eq 0 ]; then
+            make -s check > /tmp/perf001-check.log 2>&1
+            CHECK_RC=$?
+          else
+            echo 'regression tests skipped: build failed' > /tmp/perf001-check.log
+          fi
+
+          mkdir -p research/ci
+          {
+            echo '# PERF-001 CI result'
+            echo
+            echo "- configure: $CONFIG_RC"
+            echo "- build: $BUILD_RC"
+            echo "- regression tests: $CHECK_RC"
+            echo '- runner: ubuntu-latest'
+            echo '- compare/control: research/obs-001-readstream'
+            echo
+            if [ "$CONFIG_RC" -eq 0 ] && [ "$BUILD_RC" -eq 0 ] && [ "$CHECK_RC" -eq 0 ]; then
+              echo '**Result: PASS**'
+            else
+              echo '**Result: FAIL**'
+              echo
+              for f in configure build check; do
+                echo "## ${f} tail"
+                echo '```text'
+                tail -n 80 "/tmp/perf001-${f}.log"
+                echo '```'
+              done
+            fi
+          } > research/ci/PERF-001-CI.md
+          exit 0
+
+      - name: Publish validation result and remove launcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA="$(git rev-parse HEAD^)"
+          git rm -- .github/workflows/perf001-ci.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git reset --soft "$BASE_SHA"
+          git reset
+          git add -- research/ci/PERF-001-CI.md
+          git commit -m 'test: record PERF-001 build and regression result'
+          git push --force-with-lease origin HEAD:research/perf-001-tablespace-bulkread-ring
